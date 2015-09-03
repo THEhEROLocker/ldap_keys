@@ -4,6 +4,9 @@ LDAP_BASE='dc=cat,dc=pdx,dc=edu'
 LDAP_URI='ldap://openldap.cat.pdx.edu'
 KEY_CLASS=sshPublicKey
 USERNAME=$USER
+FILE=""		#The file which holds the key / keys
+KEY=""
+PID=$$
 
 option_help () {
 	case "$1" in
@@ -140,16 +143,65 @@ list ()
 				printf $0; 
 			i++; 
 		} 
+			}
 		END { 
 			printf "\n" 
 		}'
 }
 
+add () # also addall ??
+{
+	reply=""
+	TEMPFILE=`tempfile`
+
+	if [ -r $FILE ]; then
+		KEYS=$(cat $FILE )
+	else
+		echo -n "Paste the key here: "
+		read KEYS
+	fi
+
+	echo "$KEYS" | \
+	awk '
+		{
+			if ( $0 !~ /^\s*$/ && $0 != "" && $0 !~ /[\n\r\t]/ )
+			{
+				printf "dn: uid='$USER',ou=People,dc=cat,dc=pdx,dc=edu\n"
+				printf "changetype: modify\n"
+				printf "add: '$KEY_CLASS'\n"
+				printf "'$KEY_CLASS': %s\n", $0
+				printf "\n"
+			}
+			else
+			{
+				system(">&2 echo BAD KEY");
+				system("rm -f '$TEMPFILE'");
+				system("kill -9 '$PID'");
+			}
+		}
+	' >> $TEMPFILE
+
+	cat $TEMPFILE | less
+
+	while [[ ($reply != 'Y') && ($reply != 'n') ]]; do
+		echo -n "Add all the listed key/keys into ldap ? (Y/n) : "
+		read reply
+	done
+
+	if [ $reply == 'Y' ]; then
+		#ldapmodify -c -D uid=$USER,ou=People,$ldap_base -W -ZZ -H $ldap_uri -f $tempfile
+	fi
+
+	rm $TEMPFILE
+return
+}
 
 main ()
 {
-	while getopts "la:A:d:D:f:u:t:-:h" ARG
+	while getopts "a:A:d:D:f:u:t:-:hl" ARG
 	do
+#		if [[ $ARG =~ $CHECK ]]; then
+#			
 		case $ARG in
 			h)	# Print the usage help message and exit
 				print_usage
@@ -168,13 +220,22 @@ main ()
 						USERNAME=${OPTARG#*=}
 						list
 						;;
+					add-key=*) 	
+						FILE=${OPTARG#*=}
+						add
+						;;
+					*)	
+						print_usage
+						exit 10
+						;;
 				esac
 				;;
 			l)	# lists the keys 
 				list
 				;;
 			a)	#Adds a specified key to ldap
-				echo "add one key"
+				FILE=${OPTARG}
+				add
 				;;
 			A)	# Print the usage help message and exit
 				print_usage
@@ -185,8 +246,8 @@ main ()
 			D)	# Print the usage help message and exit
 				print_usage
 				;;
-			f)	# Print the usage help message and exit
-				print_usage
+			f)	
+				FILE=${OPTARG}
 				;;
 			t)	
 				print_usage
