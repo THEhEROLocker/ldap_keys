@@ -1,12 +1,21 @@
 #!/bin/bash
 
+trap ctrl_c SIGHUP SIGINT SIGTERM
+
 LDAP_BASE='dc=cat,dc=pdx,dc=edu'
 LDAP_URI='ldap://openldap.cat.pdx.edu'
 KEY_CLASS=sshPublicKey
 USERNAME=$USER
 FILE=""		#The file which holds the key / keys
-KEY=""
 PID=$$
+TEMPFILE=`tempfile`
+
+ctrl_c() {
+	rm -f $TEMPFILE
+	echo ""
+	echo "fuck you for hitting CTRL-C"
+	exit 10;
+}
 
 option_help () {
 	case "$1" in
@@ -143,7 +152,6 @@ list ()
 				printf $0; 
 			i++; 
 		} 
-			}
 		END { 
 			printf "\n" 
 		}'
@@ -152,7 +160,6 @@ list ()
 add () # also addall ??
 {
 	reply=""
-	TEMPFILE=`tempfile`
 
 	if [ -r $FILE ]; then
 		KEYS=$(cat $FILE )
@@ -164,7 +171,7 @@ add () # also addall ??
 	echo "$KEYS" | \
 	awk '
 		{
-			if ( $0 !~ /^\s*$/ && $0 != "" && $0 !~ /[\n\r\t]/ )
+			if ( $0 !~ /^\s*$/ && $0 != "" && $0 !~ /[\n\r]/ )
 			{
 				printf "dn: uid='$USER',ou=People,dc=cat,dc=pdx,dc=edu\n"
 				printf "changetype: modify\n"
@@ -176,12 +183,12 @@ add () # also addall ??
 			{
 				system(">&2 echo BAD KEY");
 				system("rm -f '$TEMPFILE'");
-				system("kill -9 '$PID'");
+				system("kill '$PID'");
 			}
 		}
 	' >> $TEMPFILE
 
-	cat $TEMPFILE | less
+		cat $TEMPFILE | less
 
 	while [[ ($reply != 'Y') && ($reply != 'n') ]]; do
 		echo -n "Add all the listed key/keys into ldap ? (Y/n) : "
@@ -189,16 +196,40 @@ add () # also addall ??
 	done
 
 	if [ $reply == 'Y' ]; then
-		#ldapmodify -c -D uid=$USER,ou=People,$ldap_base -W -ZZ -H $ldap_uri -f $tempfile
+		#ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
+		echo "in the if"
 	fi
 
-	rm $TEMPFILE
 return
+}
+
+delete ()
+{
+	list
+	echo ""
+	echo -n "Index for the the key that is going to be deleted: "
+	read reply
+	list | \
+	awk '
+	BEGIN {
+		printf "dn: uid='$USER',ou=People,dc=cat,dc=pdx,dc=edu\n"
+		printf "changetype: modify\n"
+		printf "delete: '$KEY_CLASS'\n"
+	}
+	{
+		if($1 == '$reply')
+		{
+			gsub(/^[0-9]+ /,"",$0);
+			print $0
+		}
+	}' >> $TEMPFILE
+
+	ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
 }
 
 main ()
 {
-	while getopts "a:A:d:D:f:u:t:-:hl" ARG
+	while getopts "a::A:D:f:u:t:-:hdl" ARG
 	do
 #		if [[ $ARG =~ $CHECK ]]; then
 #			
@@ -241,7 +272,7 @@ main ()
 				print_usage
 				;;
 			d)	# Print the usage help message and exit
-				print_usage
+				delete
 				;;
 			D)	# Print the usage help message and exit
 				print_usage
@@ -258,4 +289,5 @@ main ()
 }
 
 main $@
+rm $TEMPFILE
 exit 0
