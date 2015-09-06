@@ -119,7 +119,7 @@ print_usage () {
 	  [-u|--user <username>]     : modify a different user than yourself
 	  [-t|--key-type <key type>] : class of key to modify
 	  [-f|--file <filename>]     : add key from file
-	  [-h|--help|help]           : this help
+	  [-h|--helphelp|help]           : this help
 
 	Note: options and commands are parsed sequentially. "ldapkeys -t sshPublicKeyDroog add" will behave different from "ldapkeys add -t Droog". The second example will add a key of type sshPublicKey rather than sshPublicKeyDroog
 	EOF
@@ -133,6 +133,12 @@ list ()
 	if [ -z $USERNAME ] || [ -z $KEY_CLASS ]; then
 		option_help list
 		exit 10
+	fi
+	check=`ldapsearch -xLLL -H $LDAP_URI -b uid=$USERNAME,ou=People,dc=cat,dc=pdx,dc=edu $KEY_CLASS | wc -l`
+
+	if [ $check -le 2 ]; then
+		>&2 echo No Keys Found
+		exit 0
 	fi
 
 	ldapsearch -xLLL -H $LDAP_URI -b uid=$USERNAME,ou=People,dc=cat,dc=pdx,dc=edu $KEY_CLASS | \
@@ -183,7 +189,7 @@ add () # also addall ??
 			{
 				system(">&2 echo BAD KEY");
 				system("rm -f '$TEMPFILE'");
-				system("kill '$PID'");
+				system("kill -9 '$PID'");
 			}
 		}
 	' >> $TEMPFILE
@@ -205,10 +211,27 @@ return
 
 delete ()
 {
+	reply=0
 	list
+	NO_OF_KEYS=`list | sed '/^$/d' | wc -l`
 	echo ""
-	echo -n "Index for the the key that is going to be deleted: "
-	read reply
+
+	until [ $reply -ge 1 ] && [ $reply -le $NO_OF_KEYS ]; do
+		echo -n "Index for the the key that is going to be deleted: "
+		read reply
+	done
+
+	echo ""
+
+	while [[ ($reply != 'Y') && ($reply != 'n') ]]; do
+		echo -n "Are you sure you want to delete this key ? (Y/n) : "
+		read reply
+	done
+
+	if [[ ($reply != 'Y') ]]; then
+		exit 20
+	fi
+
 	list | \
 	awk '
 	BEGIN {
@@ -224,68 +247,69 @@ delete ()
 		}
 	}' >> $TEMPFILE
 
-	ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
+	#ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
+}
+
+run()
+{   
+    while [ ! -z "$1" ];
+    do
+		$1
+		shift
+    done
 }
 
 main ()
 {
-	while getopts "a::A:D:f:u:t:-:hdl" ARG
-	do
-#		if [[ $ARG =~ $CHECK ]]; then
-#			
-		case $ARG in
-			h)	# Print the usage help message and exit
-				print_usage
-				exit 0
-				;;
-			-)	# Print the usage help message and exit
-				case ${OPTARG} in
-					help) 	
-						print_usage
-						exit 0
-						;;
-					list) 	
-						list
-						;;
-					list-user=*) 	
-						USERNAME=${OPTARG#*=}
-						list
-						;;
-					add-key=*) 	
-						FILE=${OPTARG#*=}
-						add
-						;;
-					*)	
-						print_usage
-						exit 10
-						;;
-				esac
-				;;
-			l)	# lists the keys 
-				list
-				;;
-			a)	#Adds a specified key to ldap
-				FILE=${OPTARG}
-				add
-				;;
-			A)	# Print the usage help message and exit
-				print_usage
-				;;
-			d)	# Print the usage help message and exit
-				delete
-				;;
-			D)	# Print the usage help message and exit
-				print_usage
-				;;
-			f)	
-				FILE=${OPTARG}
-				;;
-			t)	
-				print_usage
-				;;
-		esac
-	done
-	
+
+Array=""
+
+if [ $# == 0 ]; then
+    help
+fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+		-u) 
+			USERNAME=${2}
+			shift
+			shift;;
+		-t | --key-class=*) 
+			if [ $1 =~ '^--key-class=' ]; then
+				KEY_CLASS=${1#*=}
+			else
+				KEY_CLASS=$2; 
+				shift
+			fi
+			shift;;
+		-l | list | --list | --list-user=*) 
+			if [[ $1 =~ '^--list-user=' ]]; then
+				USERNAME=${1#*=}
+			fi
+			Array="$ARRAY list"
+			shift
+			;;
+		-A | addall) 
+			Array="$ARRAY add";;
+		-D | deleteall) 
+			Array="$ARRAY deleteall"
+			;;
+		-f) 
+			FILE="$2"; 
+			shift; add;;
+		-h | help | --help) 
+			if [ "$2" ]; then
+                option_help "$2"
+				shift
+            else
+                help
+            fi
+            shift;;
+    esac
+done
+
+run $Array
+
 }
 
 main $@
