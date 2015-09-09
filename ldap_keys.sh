@@ -5,9 +5,9 @@ trap ctrl_c SIGHUP SIGINT SIGTERM
 LDAP_BASE='dc=cat,dc=pdx,dc=edu'
 LDAP_URI='ldap://openldap.cat.pdx.edu'
 KEY_CLASS=sshPublicKey
+FILE='/etc/bullshit'
 USERNAME=$USER
 PID=$$
-FILE=""
 TEMPFILE=`tempfile`
 
 ctrl_c() {
@@ -95,21 +95,21 @@ option_help () {
 
 print_usage () {
 	cat <<-EOF
-	"This script will help you manage your ssh keys in LDAP. You must run it from a CAT box.
+	"This script will help you manage your ssh keys in LDAP. You must run it from a CAT managed box.
 	  (i.e. scissors, ada, chandra, adelie)
 
 	Usage:
 	  $(basename $0) [-t <key type>] [-f <file>] [-u user] <list|add|add-all|delete|delete-all>
 
 	Options:
-	  list | -l | --list-user=<USERNAME>  : list keys
-	  add  | -a <path to key>             : add a key interactively (or for path to file if specified)
-	  add-all | -A <path to keys>         : add all keys in a file (default $HOME/.ssh/authorized_keys)
-	  delete | -d                         : interactive delete
-	  delete-all | -D                     : delete all keys from ldap
-	  -u | --user <username>              : modify a different user than yourself
-	  -t | --key-type <key type>          : class of key to modify
-	  -h |- -help | help                  : this help
+	  -l | list | --list-user=<USERNAME>        : list keys
+	  -a | add  | --add <path to key>           : add a key interactively (or for path to file if specified)
+	  -A | add-all | --add-all <path to keys>   : add all keys in a file (default $HOME/.ssh/authorized_keys)
+	  -d | delete  | --delete                   : interactive delete
+	  -D | delete-all | ---delete-all           : delete all keys from ldap
+	  -u | --user <username>                    : modify a different user than yourself
+	  -t | --key-type <key type>                : class of key to modify
+	  -h | --help | help                        : this help
 
 	Note : Order of arguments is taken care of
 			$(basename $0) -u rohane -l is same as $(basename $0) -l -u rohane
@@ -154,12 +154,12 @@ list ()
 		}'
 }
 
-add () # also addall ??
+add () 
 {
 	reply=""
 
-	if [ -r $KEYS ]; then
-		KEYS=$(cat $FILE )
+	if [ -r $FILE ]; then
+		KEYS=$(cat $FILE)
 	else
 		echo -n "Paste the key here: "
 		read KEYS
@@ -193,8 +193,7 @@ add () # also addall ??
 	done
 
 	if [ $reply == 'Y' ]; then
-		#ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
-		echo "in the if"
+		ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
 	fi
 
 return
@@ -209,12 +208,12 @@ deleteall ()
 		read reply
 	done
 
-	if [[ ($answer == 'Y') ]]; then
+	if [[ ($reply == 'Y') ]]; then
 		echo "dn: uid=$USERNAME,ou=People,$LDAP_BASE" >> $TEMPFILE
 		echo "changetype: modify" >> $TEMPFILE
 		echo "delete: $KEY_CLASS" >> $TEMPFILE
 
-		#ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
+		ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
 	fi
     return
 
@@ -223,13 +222,14 @@ deleteall ()
 delete ()
 {
 	reply=0
+	toDelete=0
 	list
 	NO_OF_KEYS=$(list | sed '/^$/d' | wc -l)
 	echo ""
 
-	until [ $reply -ge 1 ] && [ $reply -le $NO_OF_KEYS ]; do
+	until [ $toDelete -ge 1 ] && [ $toDelete -le $NO_OF_KEYS ]; do
 		echo -n "Index for the the key that is going to be deleted: "
-		read reply
+		read toDelete
 	done
 
 	echo ""
@@ -251,14 +251,14 @@ delete ()
 		printf "delete: '$KEY_CLASS'\n"
 	}
 	{
-		if($1 == '$reply')
+		if($1 == '$toDelete')
 		{
 			gsub(/^[0-9]+ /,"",$0);
 			print $0
 		}
 	}' >> $TEMPFILE
 
-	#ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
+	ldapmodify -c -D uid=$USER,ou=People,$LDAP_BASE -W -ZZ -H $LDAP_URI -f $TEMPFILE
 }
 
 key_type_check()
@@ -292,10 +292,10 @@ main ()
 
 	while [ $# -gt 0 ]; do
 		case "$1" in
-			-u) 
+			-u | --user) 
 				USERNAME=${2}
 				shift;;
-			-t ) 
+			-t | --key-type)
 				KEY_CLASS="$KEY_CLASS${2}"
 				shift
 				key_type_check
@@ -305,24 +305,26 @@ main ()
 				fi
 				;;
 			-l | list | --list | --list-user=*) 
-				if [[ $1 =~ '^--list-user=' ]]; then
+				if [[ $1 =~ ^--list-user= ]]; then
 					USERNAME=${1#*=}
 				fi
 				Array="$ARRAY list"
 				;;
-			-A | addall) 
+			-A | addall | --add-all) 
 				FILE='/u/'$USER'/.ssh/authorized_keys'
 				Array="$ARRAY add"
 				;;
-			-a | add | --add) 
-				FILE=${2}
+			-a | add | --add)
+				if [ -r $2 ] && [ ! -z ${2} ]; then
+					FILE=${2}
+					shift
+				fi
 				Array="$ARRAY add"
-				shift
 				;;
-			-d |delete |--delete) 
+			-d | delete | --delete) 
 				Array="$ARRAY delete"
 				;;
-			-D | deleteall) 
+			-D | deleteall | --delete-all) 
 				Array="$ARRAY deleteall"
 				;;
 			-h | help | --help) 
